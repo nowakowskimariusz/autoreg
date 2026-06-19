@@ -11,7 +11,7 @@ terraform {
   # Recommended: store state in the platform/connectivity subscription.
   # backend "azurerm" {
   #   resource_group_name  = "rg-tfstate-platform"
-  #   storage_account_name = "stfrontextfstate"
+  #   storage_account_name = "stcontosotfstate"
   #   container_name       = "tfstate"
   #   key                  = "az-fx-dns-registrar/platform.tfstate"
   # }

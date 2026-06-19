@@ -200,7 +200,7 @@ provider "azurerm" {
 }
 
 module "dns_registration" {
-  source = "git::https://dev.azure.com/frontex/_git/az-fx-dns-registrar//terraform/spoke?ref=v1.0.0"
+  source = "git::https://dev.azure.com/contoso/_git/az-fx-dns-registrar//terraform/spoke?ref=v1.0.0"
 
   subscription_id       = var.project_subscription_id
   location              = "westeurope"

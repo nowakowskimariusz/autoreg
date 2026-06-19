@@ -1,6 +1,6 @@
 # Centralized VM DNS Registration into `az.fx` — Architecture Options & Recommendation
 
-**Context:** Frontex ALZ (CAF) on Azure vWAN. Microsoft-managed virtual hub, spoke vNets per project, each project locked to its own subscription, Azure DevOps service connections scoped per-subscription, Terraform for all deployments, Azure DNS Private Resolver already deployed for on-prem integration. Goal: every project VM gets an A record in the single central private DNS zone `az.fx`, with create/update/**delete** handled automatically and centrally.
+**Context:** Contoso ALZ (CAF) on Azure vWAN. Microsoft-managed virtual hub, spoke vNets per project, each project locked to its own subscription, Azure DevOps service connections scoped per-subscription, Terraform for all deployments, Azure DNS Private Resolver already deployed for on-prem integration. Goal: every project VM gets an A record in the single central private DNS zone `az.fx`, with create/update/**delete** handled automatically and centrally.
 
 **Date:** June 2026
 
@@ -20,7 +20,7 @@ The 100-vNet cap applies **only to auto-registration links**. Resolution links a
 
 These are **independent** limits, and the private DNS limits carry **no "raise via support" footnote** — treat 100 as a hard architectural ceiling.
 
-**Consequence for Frontex:** you do not have a *resolution* problem. You can link up to ~1000 spoke vNets to `az.fx` as resolution-only links (and your Private DNS Resolver already covers on-prem). You only have a *registration* problem. So the design goal is: **stop relying on per-spoke auto-registration, and register records centrally via the Azure DNS API instead.** Resolution stays exactly as it is today.
+**Consequence for Contoso:** you do not have a *resolution* problem. You can link up to ~1000 spoke vNets to `az.fx` as resolution-only links (and your Private DNS Resolver already covers on-prem). You only have a *registration* problem. So the design goal is: **stop relying on per-spoke auto-registration, and register records centrally via the Azure DNS API instead.** Resolution stays exactly as it is today.
 
 ---
 
@@ -65,7 +65,7 @@ This is the only approach that fully replicates native auto-registration's lifec
 3. Events route to a single central **Azure Function** (in the connectivity/platform subscription) that reads the NIC's private IP and upserts/deletes the record in `az.fx` via the Azure DNS SDK/REST API, using its managed identity.
 4. A **scheduled reconciliation job** (Function timer or Automation runbook) periodically queries all NICs via Azure Resource Graph and compares against the zone, cleaning up any records missed due to dropped events. This is your safety net — events are best-effort, so dead-lettering + reconciliation are mandatory for correctness.
 
-**Why this fits Frontex specifically**
+**Why this fits Contoso specifically**
 - **Central by design** — all registration logic lives in the platform subscription. Project teams keep deploying VMs through their subscription-scoped service connections and never touch `az.fx`. No delegation of zone permissions to projects.
 - **Full lifecycle** — create, update, *and* delete, matching what native auto-registration did before you outgrew it.
 - **No hub components** — nothing is deployed into the managed vWAN hub. The Function lives in a normal platform subscription; the resolver stays where it is.
