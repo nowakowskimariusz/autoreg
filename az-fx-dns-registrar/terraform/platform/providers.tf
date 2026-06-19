@@ -6,6 +6,12 @@ terraform {
       source  = "hashicorp/azurerm"
       version = "~> 4.0"
     }
+    # Used to create the deployment blob container via the management plane,
+    # so it works even though the storage account has no public/data-plane access.
+    azapi = {
+      source  = "azure/azapi"
+      version = "~> 2.0"
+    }
   }
 
   # Recommended: store state in the platform/connectivity subscription.
@@ -17,10 +23,15 @@ terraform {
   # }
 }
 
-# Default provider = the platform / connectivity subscription that hosts both
-# the Function App and (in the standard ALZ layout) the az.fx private DNS zone.
+# Default provider = the platform / connectivity subscription that hosts the
+# Function App and (in the standard ALZ layout) the az.fx private DNS zone and
+# the storage privatelink DNS zones.
 provider "azurerm" {
   features {}
+  subscription_id = var.platform_subscription_id
+}
+
+provider "azapi" {
   subscription_id = var.platform_subscription_id
 }
 

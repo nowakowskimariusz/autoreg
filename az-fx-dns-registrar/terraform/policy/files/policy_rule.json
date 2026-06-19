@@ -22,7 +22,7 @@
           "mode": "incremental",
           "parameters": {
             "rgName": { "value": "[parameters('resourceGroupName')]" },
-            "location": { "value": "[parameters('deploymentLocation')]" },
+            "systemTopicName": { "value": "[parameters('systemTopicName')]" },
             "registrarFunctionId": { "value": "[parameters('registrarFunctionId')]" }
           },
           "template": {
@@ -30,40 +30,33 @@
             "contentVersion": "1.0.0.0",
             "parameters": {
               "rgName": { "type": "string" },
-              "location": { "type": "string" },
+              "systemTopicName": { "type": "string" },
               "registrarFunctionId": { "type": "string" }
             },
             "resources": [
-              {
-                "type": "Microsoft.Resources/resourceGroups",
-                "apiVersion": "2022-09-01",
-                "name": "[parameters('rgName')]",
-                "location": "[parameters('location')]"
-              },
               {
                 "type": "Microsoft.Resources/deployments",
                 "apiVersion": "2022-09-01",
                 "name": "deploy-egst-vm-dns-registration",
                 "resourceGroup": "[parameters('rgName')]",
-                "dependsOn": [
-                  "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('rgName'))]"
-                ],
                 "properties": {
                   "mode": "Incremental",
                   "parameters": {
+                    "systemTopicName": { "value": "[parameters('systemTopicName')]" },
                     "registrarFunctionId": { "value": "[parameters('registrarFunctionId')]" }
                   },
                   "template": {
                     "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
                     "contentVersion": "1.0.0.0",
                     "parameters": {
+                      "systemTopicName": { "type": "string" },
                       "registrarFunctionId": { "type": "string" }
                     },
                     "resources": [
                       {
                         "type": "Microsoft.EventGrid/systemTopics",
                         "apiVersion": "2022-06-15",
-                        "name": "egst-vm-dns-registration",
+                        "name": "[parameters('systemTopicName')]",
                         "location": "global",
                         "properties": {
                           "source": "[concat('/subscriptions/', subscription().subscriptionId)]",
@@ -73,9 +66,9 @@
                       {
                         "type": "Microsoft.EventGrid/systemTopics/eventSubscriptions",
                         "apiVersion": "2022-06-15",
-                        "name": "egst-vm-dns-registration/vm-dns-registration",
+                        "name": "[concat(parameters('systemTopicName'), '/vm-dns-registration')]",
                         "dependsOn": [
-                          "[resourceId('Microsoft.EventGrid/systemTopics', 'egst-vm-dns-registration')]"
+                          "[resourceId('Microsoft.EventGrid/systemTopics', parameters('systemTopicName'))]"
                         ],
                         "properties": {
                           "destination": {

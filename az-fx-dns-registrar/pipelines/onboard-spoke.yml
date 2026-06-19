@@ -23,9 +23,10 @@ parameters:
   - name: registrarFunctionId
     type: string
     displayName: 'Registrar function ID (.../functions/RegisterVmDns)'
-  - name: location
+  - name: resourceGroupName
     type: string
-    default: westeurope
+    default: rg-network
+    displayName: 'Existing RG in the spoke for the system topic'
   - name: deadLetterContainerId
     type: string
     default: ''
@@ -87,5 +88,5 @@ stages:
                         -var "subscription_id=${{ parameters.spokeSubscriptionId }}" \
                         -var "registrar_function_id=${{ parameters.registrarFunctionId }}" \
                         -var "project_name=${{ parameters.projectName }}" \
-                        -var "location=${{ parameters.location }}" \
+                        -var "resource_group_name=${{ parameters.resourceGroupName }}" \
                         -var "dead_letter_storage_container_id=${{ parameters.deadLetterContainerId }}"

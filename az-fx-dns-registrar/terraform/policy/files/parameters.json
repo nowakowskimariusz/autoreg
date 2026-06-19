@@ -23,15 +23,23 @@
     "type": "String",
     "metadata": {
       "displayName": "Resource group name",
-      "description": "Resource group created in each spoke subscription to hold the Event Grid system topic."
+      "description": "EXISTING resource group in each spoke that will hold the Event Grid system topic (workload subscriptions already have rg-network)."
     },
-    "defaultValue": "rg-dns-registration"
+    "defaultValue": "rg-network"
+  },
+  "systemTopicName": {
+    "type": "String",
+    "metadata": {
+      "displayName": "System topic name",
+      "description": "Name of the shared subscription-level Event Grid system topic."
+    },
+    "defaultValue": "egst-subscription-events"
   },
   "deploymentLocation": {
     "type": "String",
     "metadata": {
       "displayName": "Deployment location",
-      "description": "Region used for the resource group and subscription deployment metadata."
+      "description": "Region used for the subscription deployment metadata."
     },
     "defaultValue": "westeurope"
   }

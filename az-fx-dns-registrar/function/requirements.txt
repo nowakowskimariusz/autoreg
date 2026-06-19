@@ -1,0 +1,7 @@
+# Installed server-side by the Flex Consumption remote build (Oryx/pip).
+azure-functions
+azure-identity
+azure-mgmt-privatedns
+azure-mgmt-compute
+azure-mgmt-network
+azure-mgmt-resourcegraph

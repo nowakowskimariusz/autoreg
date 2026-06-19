@@ -12,3 +12,5 @@ terraform.rc
 function/local.settings.json
 function/bin
 function/obj
+.DS_Store
+**/.DS_Store

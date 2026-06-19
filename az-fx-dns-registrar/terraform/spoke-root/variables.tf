@@ -3,15 +3,15 @@ variable "subscription_id" {
   description = "Spoke (project) subscription ID being onboarded."
 }
 
-variable "location" {
-  type        = string
-  default     = "westeurope"
-  description = "Region for the system-topic resource group."
-}
-
 variable "registrar_function_id" {
   type        = string
   description = "Resource ID of the central RegisterVmDns function."
+}
+
+variable "resource_group_name" {
+  type        = string
+  default     = "rg-network"
+  description = "Existing RG in the spoke to hold the system topic (reuses rg-network)."
 }
 
 variable "project_name" {

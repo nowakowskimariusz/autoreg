@@ -38,6 +38,9 @@ variables:
   #   zoneName                   (e.g. az.fx)
   #   managementGroupId
   #   location                   (e.g. westeurope)
+  #   privatelinkBlobDnsZoneId   (resource ID of privatelink.blob.core.windows.net)
+  #   privatelinkQueueDnsZoneId  (resource ID of privatelink.queue.core.windows.net)
+  #   privatelinkTableDnsZoneId  (resource ID of privatelink.table.core.windows.net)
   #   tfBackendResourceGroup
   #   tfBackendStorageAccount
   #   tfBackendContainer
@@ -71,20 +74,23 @@ stages:
                   terraform -chdir="$d" init -backend=false -input=false
                   terraform -chdir="$d" validate
                 done
-      - job: ps
-        displayName: PowerShell lint
+      - job: py
+        displayName: Python lint
         steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '3.12'
           - task: Bash@3
-            displayName: 'PSScriptAnalyzer'
+            displayName: 'Compile + import check'
             inputs:
               targetType: inline
               script: |
                 set -euo pipefail
-                pwsh -NoProfile -Command "
-                  Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
-                  \$r = Invoke-ScriptAnalyzer -Path ./function -Recurse -Severity Error
-                  if (\$r) { \$r | Format-Table; exit 1 } else { 'No errors' }
-                "
+                cd function
+                python -m pip install --upgrade pip
+                python -m py_compile function_app.py
+                pip install -r requirements.txt
+                python -c "import ast; ast.parse(open('function_app.py').read()); print('function_app.py OK')"
 
   # ---------------------------------------------------------------------------
   - stage: DeployPlatform
@@ -134,7 +140,10 @@ stages:
                         -var "zone_resource_group=$(zoneResourceGroup)" \
                         -var "zone_name=$(zoneName)" \
                         -var "location=$(location)" \
-                        -var "management_group_id=$(managementGroupId)"
+                        -var "management_group_id=$(managementGroupId)" \
+                        -var "privatelink_blob_dns_zone_id=$(privatelinkBlobDnsZoneId)" \
+                        -var "privatelink_queue_dns_zone_id=$(privatelinkQueueDnsZoneId)" \
+                        -var "privatelink_table_dns_zone_id=$(privatelinkTableDnsZoneId)"
 
                       FUNC_ID="$(terraform output -raw registrar_function_id)"
                       FUNC_NAME="$(terraform output -raw function_app_name)"
@@ -143,7 +152,7 @@ stages:
 
   # ---------------------------------------------------------------------------
   - stage: DeployFunction
-    displayName: Deploy Function code
+    displayName: Deploy Function code (Flex Consumption)
     dependsOn: DeployPlatform
     variables:
       functionAppName: $[ stageDependencies.DeployPlatform.platform.outputs['platform.tfapply.functionAppName'] ]
@@ -151,6 +160,15 @@ stages:
       - job: publish
         displayName: Publish Function App
         steps:
+          # Deployment note: the function app keeps PUBLIC inbound access (only the
+          # STORAGE is private). One-deploy uploads the package via the app's SCM
+          # endpoint; the platform stages it to the private deployment container
+          # using the app's managed identity. So a Microsoft-hosted agent works.
+          # If you later make the app itself private, switch to a self-hosted agent
+          # / Managed DevOps Pool with VNet line-of-sight (see README section 14).
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '3.12'
           - task: ArchiveFiles@2
             displayName: 'Zip function/'
             inputs:
@@ -164,10 +182,10 @@ stages:
             inputs:
               connectionType: AzureRM
               azureSubscription: $(platformServiceConnection)
-              appType: functionApp
+              appType: functionAppLinux
+              isFlexConsumption: true        # required for Flex; forces one-deploy
               appName: $(functionAppName)
               package: '$(Build.ArtifactStagingDirectory)/function.zip'
-              deploymentMethod: zipDeploy
 
   # ---------------------------------------------------------------------------
   - stage: DeployPolicy
