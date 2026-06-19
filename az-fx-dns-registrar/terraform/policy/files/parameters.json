@@ -1,0 +1,38 @@
+{
+  "effect": {
+    "type": "String",
+    "metadata": {
+      "displayName": "Effect",
+      "description": "Enable or disable execution of the policy."
+    },
+    "allowedValues": [
+      "DeployIfNotExists",
+      "AuditIfNotExists",
+      "Disabled"
+    ],
+    "defaultValue": "DeployIfNotExists"
+  },
+  "registrarFunctionId": {
+    "type": "String",
+    "metadata": {
+      "displayName": "Registrar function ID",
+      "description": "Resource ID of the central RegisterVmDns function (.../functions/RegisterVmDns)."
+    }
+  },
+  "resourceGroupName": {
+    "type": "String",
+    "metadata": {
+      "displayName": "Resource group name",
+      "description": "Resource group created in each spoke subscription to hold the Event Grid system topic."
+    },
+    "defaultValue": "rg-dns-registration"
+  },
+  "deploymentLocation": {
+    "type": "String",
+    "metadata": {
+      "displayName": "Deployment location",
+      "description": "Region used for the resource group and subscription deployment metadata."
+    },
+    "defaultValue": "westeurope"
+  }
+}

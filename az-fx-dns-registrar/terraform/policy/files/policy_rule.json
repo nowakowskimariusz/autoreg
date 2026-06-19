@@ -1,0 +1,121 @@
+{
+  "if": {
+    "field": "type",
+    "equals": "Microsoft.Resources/subscriptions"
+  },
+  "then": {
+    "effect": "[parameters('effect')]",
+    "details": {
+      "type": "Microsoft.EventGrid/systemTopics",
+      "deploymentScope": "subscription",
+      "existenceScope": "subscription",
+      "existenceCondition": {
+        "field": "Microsoft.EventGrid/systemTopics/topicType",
+        "equals": "Microsoft.Resources.Subscriptions"
+      },
+      "roleDefinitionIds": [
+        "/providers/Microsoft.Authorization/roleDefinitions/b24988ac-6180-42a0-bb88-9e953243e6e8"
+      ],
+      "deployment": {
+        "location": "[parameters('deploymentLocation')]",
+        "properties": {
+          "mode": "incremental",
+          "parameters": {
+            "rgName": { "value": "[parameters('resourceGroupName')]" },
+            "location": { "value": "[parameters('deploymentLocation')]" },
+            "registrarFunctionId": { "value": "[parameters('registrarFunctionId')]" }
+          },
+          "template": {
+            "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+            "contentVersion": "1.0.0.0",
+            "parameters": {
+              "rgName": { "type": "string" },
+              "location": { "type": "string" },
+              "registrarFunctionId": { "type": "string" }
+            },
+            "resources": [
+              {
+                "type": "Microsoft.Resources/resourceGroups",
+                "apiVersion": "2022-09-01",
+                "name": "[parameters('rgName')]",
+                "location": "[parameters('location')]"
+              },
+              {
+                "type": "Microsoft.Resources/deployments",
+                "apiVersion": "2022-09-01",
+                "name": "deploy-egst-vm-dns-registration",
+                "resourceGroup": "[parameters('rgName')]",
+                "dependsOn": [
+                  "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('rgName'))]"
+                ],
+                "properties": {
+                  "mode": "Incremental",
+                  "parameters": {
+                    "registrarFunctionId": { "value": "[parameters('registrarFunctionId')]" }
+                  },
+                  "template": {
+                    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                      "registrarFunctionId": { "type": "string" }
+                    },
+                    "resources": [
+                      {
+                        "type": "Microsoft.EventGrid/systemTopics",
+                        "apiVersion": "2022-06-15",
+                        "name": "egst-vm-dns-registration",
+                        "location": "global",
+                        "properties": {
+                          "source": "[concat('/subscriptions/', subscription().subscriptionId)]",
+                          "topicType": "Microsoft.Resources.Subscriptions"
+                        }
+                      },
+                      {
+                        "type": "Microsoft.EventGrid/systemTopics/eventSubscriptions",
+                        "apiVersion": "2022-06-15",
+                        "name": "egst-vm-dns-registration/vm-dns-registration",
+                        "dependsOn": [
+                          "[resourceId('Microsoft.EventGrid/systemTopics', 'egst-vm-dns-registration')]"
+                        ],
+                        "properties": {
+                          "destination": {
+                            "endpointType": "AzureFunction",
+                            "properties": {
+                              "resourceId": "[parameters('registrarFunctionId')]",
+                              "maxEventsPerBatch": 1,
+                              "preferredBatchSizeInKilobytes": 64
+                            }
+                          },
+                          "filter": {
+                            "includedEventTypes": [
+                              "Microsoft.Resources.ResourceWriteSuccess",
+                              "Microsoft.Resources.ResourceDeleteSuccess"
+                            ],
+                            "advancedFilters": [
+                              {
+                                "operatorType": "StringIn",
+                                "key": "data.operationName",
+                                "values": [
+                                  "Microsoft.Compute/virtualMachines/write",
+                                  "Microsoft.Compute/virtualMachines/delete"
+                                ]
+                              }
+                            ]
+                          },
+                          "retryPolicy": {
+                            "maxDeliveryAttempts": 30,
+                            "eventTimeToLiveInMinutes": 1440
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

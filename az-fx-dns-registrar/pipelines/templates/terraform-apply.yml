@@ -1,0 +1,62 @@
+# Reusable step template: run terraform init + (plan/apply) for one module,
+# authenticating with an Azure DevOps ARM service connection.
+#
+# It exports the service-connection credentials as ARM_* environment variables
+# so Terraform's azurerm provider authenticates as the connection's SPN.
+
+parameters:
+  - name: serviceConnection
+    type: string
+  - name: workingDirectory
+    type: string
+  - name: command            # plan | apply
+    type: string
+    default: apply
+  - name: tfVars             # extra "-var k=v" arguments
+    type: string
+    default: ''
+  - name: backendConfig      # extra "-backend-config=..." arguments
+    type: string
+    default: ''
+  - name: terraformVersion
+    type: string
+    default: '1.9.8'
+
+steps:
+  - task: Bash@3
+    displayName: 'Install Terraform ${{ parameters.terraformVersion }}'
+    inputs:
+      targetType: inline
+      script: |
+        set -euo pipefail
+        VER='${{ parameters.terraformVersion }}'
+        if ! command -v terraform >/dev/null || [ "$(terraform version -json | jq -r .terraform_version)" != "$VER" ]; then
+          curl -sLo tf.zip "https://releases.hashicorp.com/terraform/${VER}/terraform_${VER}_linux_amd64.zip"
+          unzip -o -q tf.zip
+          sudo mv terraform /usr/local/bin/terraform
+        fi
+        terraform version
+
+  - task: AzureCLI@2
+    displayName: 'terraform ${{ parameters.command }} (${{ parameters.workingDirectory }})'
+    inputs:
+      azureSubscription: ${{ parameters.serviceConnection }}
+      scriptType: bash
+      addSpnToEnvironment: true
+      workingDirectory: ${{ parameters.workingDirectory }}
+      inlineScript: |
+        set -euo pipefail
+        # Map the AzureCLI SPN context to Terraform's azurerm provider.
+        export ARM_CLIENT_ID="$servicePrincipalId"
+        export ARM_CLIENT_SECRET="$servicePrincipalKey"
+        export ARM_TENANT_ID="$tenantId"
+        export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+
+        terraform init -input=false ${{ parameters.backendConfig }}
+        terraform validate
+
+        if [ "${{ parameters.command }}" = "plan" ]; then
+          terraform plan -input=false ${{ parameters.tfVars }}
+        else
+          terraform apply -input=false -auto-approve ${{ parameters.tfVars }}
+        fi

@@ -1,0 +1,222 @@
+# =============================================================================
+# Central CD pipeline for the az.fx DNS registrar.
+#
+# Stages:
+#   1. Validate       - terraform fmt/validate for all modules
+#   2. DeployPlatform  - apply terraform/platform; export registrar function id
+#   3. DeployFunction  - publish the Function App code
+#   4. DeployPolicy    - apply terraform/policy (assign DINE policy at the MG)
+#
+# Prereqs:
+#   * Variable group "az-fx-dns-registrar" (see variables below)
+#   * An ARM service connection scoped to the platform subscription AND with
+#     access to the management group (needed for MG role assignments + policy).
+#   * A terraform state backend (Azure Storage) - values supplied via the
+#     variable group and passed as -backend-config.
+# =============================================================================
+
+trigger:
+  branches:
+    include: [main]
+  paths:
+    include:
+      - function/*
+      - terraform/platform/*
+      - terraform/policy/*
+      - azure-pipelines.yml
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - group: az-fx-dns-registrar
+  # Expected in the variable group:
+  #   platformServiceConnection  - ARM service connection name
+  #   platformSubscriptionId
+  #   zoneSubscriptionId
+  #   zoneResourceGroup
+  #   zoneName                   (e.g. az.fx)
+  #   managementGroupId
+  #   location                   (e.g. westeurope)
+  #   tfBackendResourceGroup
+  #   tfBackendStorageAccount
+  #   tfBackendContainer
+
+stages:
+  # ---------------------------------------------------------------------------
+  - stage: Validate
+    displayName: Validate
+    jobs:
+      - job: tf
+        displayName: Terraform validate
+        steps:
+          - task: Bash@3
+            displayName: 'Install Terraform'
+            inputs:
+              targetType: inline
+              script: |
+                set -euo pipefail
+                curl -sLo tf.zip https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip
+                unzip -o -q tf.zip && sudo mv terraform /usr/local/bin/terraform
+                terraform version
+          - task: Bash@3
+            displayName: 'fmt + validate (all modules)'
+            inputs:
+              targetType: inline
+              script: |
+                set -euo pipefail
+                terraform -chdir=terraform/platform fmt -check -recursive
+                for d in terraform/platform terraform/spoke terraform/policy; do
+                  echo "== validate $d =="
+                  terraform -chdir="$d" init -backend=false -input=false
+                  terraform -chdir="$d" validate
+                done
+      - job: ps
+        displayName: PowerShell lint
+        steps:
+          - task: Bash@3
+            displayName: 'PSScriptAnalyzer'
+            inputs:
+              targetType: inline
+              script: |
+                set -euo pipefail
+                pwsh -NoProfile -Command "
+                  Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+                  \$r = Invoke-ScriptAnalyzer -Path ./function -Recurse -Severity Error
+                  if (\$r) { \$r | Format-Table; exit 1 } else { 'No errors' }
+                "
+
+  # ---------------------------------------------------------------------------
+  - stage: DeployPlatform
+    displayName: Deploy platform (registrar)
+    dependsOn: Validate
+    jobs:
+      - deployment: platform
+        displayName: terraform apply platform
+        environment: az-fx-dns-prod      # add approvals/gates on this environment
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - task: Bash@3
+                  displayName: 'Install Terraform'
+                  inputs:
+                    targetType: inline
+                    script: |
+                      set -euo pipefail
+                      curl -sLo tf.zip https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip
+                      unzip -o -q tf.zip && sudo mv terraform /usr/local/bin/terraform
+                - task: AzureCLI@2
+                  name: tfapply
+                  displayName: 'apply + export outputs'
+                  inputs:
+                    azureSubscription: $(platformServiceConnection)
+                    scriptType: bash
+                    addSpnToEnvironment: true
+                    workingDirectory: terraform/platform
+                    inlineScript: |
+                      set -euo pipefail
+                      export ARM_CLIENT_ID="$servicePrincipalId"
+                      export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                      export ARM_TENANT_ID="$tenantId"
+                      export ARM_SUBSCRIPTION_ID="$(platformSubscriptionId)"
+
+                      terraform init -input=false \
+                        -backend-config="resource_group_name=$(tfBackendResourceGroup)" \
+                        -backend-config="storage_account_name=$(tfBackendStorageAccount)" \
+                        -backend-config="container_name=$(tfBackendContainer)" \
+                        -backend-config="key=az-fx-dns-registrar/platform.tfstate"
+
+                      terraform apply -input=false -auto-approve \
+                        -var "platform_subscription_id=$(platformSubscriptionId)" \
+                        -var "zone_subscription_id=$(zoneSubscriptionId)" \
+                        -var "zone_resource_group=$(zoneResourceGroup)" \
+                        -var "zone_name=$(zoneName)" \
+                        -var "location=$(location)" \
+                        -var "management_group_id=$(managementGroupId)"
+
+                      FUNC_ID="$(terraform output -raw registrar_function_id)"
+                      FUNC_NAME="$(terraform output -raw function_app_name)"
+                      echo "##vso[task.setvariable variable=registrarFunctionId;isOutput=true]$FUNC_ID"
+                      echo "##vso[task.setvariable variable=functionAppName;isOutput=true]$FUNC_NAME"
+
+  # ---------------------------------------------------------------------------
+  - stage: DeployFunction
+    displayName: Deploy Function code
+    dependsOn: DeployPlatform
+    variables:
+      functionAppName: $[ stageDependencies.DeployPlatform.platform.outputs['platform.tfapply.functionAppName'] ]
+    jobs:
+      - job: publish
+        displayName: Publish Function App
+        steps:
+          - task: ArchiveFiles@2
+            displayName: 'Zip function/'
+            inputs:
+              rootFolderOrFile: 'function'
+              includeRootFolder: false
+              archiveType: zip
+              archiveFile: '$(Build.ArtifactStagingDirectory)/function.zip'
+              replaceExistingArchive: true
+          - task: AzureFunctionApp@2
+            displayName: 'Deploy to $(functionAppName)'
+            inputs:
+              connectionType: AzureRM
+              azureSubscription: $(platformServiceConnection)
+              appType: functionApp
+              appName: $(functionAppName)
+              package: '$(Build.ArtifactStagingDirectory)/function.zip'
+              deploymentMethod: zipDeploy
+
+  # ---------------------------------------------------------------------------
+  - stage: DeployPolicy
+    displayName: Deploy auto-onboarding policy
+    dependsOn:
+      - DeployPlatform
+      - DeployFunction
+    variables:
+      registrarFunctionId: $[ stageDependencies.DeployPlatform.platform.outputs['platform.tfapply.registrarFunctionId'] ]
+    jobs:
+      - deployment: policy
+        displayName: terraform apply policy
+        environment: az-fx-dns-prod
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - task: Bash@3
+                  displayName: 'Install Terraform'
+                  inputs:
+                    targetType: inline
+                    script: |
+                      set -euo pipefail
+                      curl -sLo tf.zip https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip
+                      unzip -o -q tf.zip && sudo mv terraform /usr/local/bin/terraform
+                - task: AzureCLI@2
+                  displayName: 'apply policy'
+                  inputs:
+                    azureSubscription: $(platformServiceConnection)
+                    scriptType: bash
+                    addSpnToEnvironment: true
+                    workingDirectory: terraform/policy
+                    inlineScript: |
+                      set -euo pipefail
+                      export ARM_CLIENT_ID="$servicePrincipalId"
+                      export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                      export ARM_TENANT_ID="$tenantId"
+                      export ARM_SUBSCRIPTION_ID="$(platformSubscriptionId)"
+
+                      terraform init -input=false \
+                        -backend-config="resource_group_name=$(tfBackendResourceGroup)" \
+                        -backend-config="storage_account_name=$(tfBackendStorageAccount)" \
+                        -backend-config="container_name=$(tfBackendContainer)" \
+                        -backend-config="key=az-fx-dns-registrar/policy.tfstate"
+
+                      terraform apply -input=false -auto-approve \
+                        -var "platform_subscription_id=$(platformSubscriptionId)" \
+                        -var "management_group_id=$(managementGroupId)" \
+                        -var "registrar_function_id=$(registrarFunctionId)" \
+                        -var "deployment_location=$(location)" \
+                        -var "assignment_location=$(location)"

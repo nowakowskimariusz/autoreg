@@ -1,0 +1,14 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfvars
+!example.tfvars
+.terraformrc
+terraform.rc
+
+# Azure Functions
+function/local.settings.json
+function/bin
+function/obj

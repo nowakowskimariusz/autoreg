@@ -1,0 +1,91 @@
+# =============================================================================
+# Per-spoke onboarding pipeline.
+#
+# Wires ONE project subscription for VM DNS registration by applying the spoke
+# module (Event Grid system topic + VM event subscription -> central registrar).
+#
+# Use this when you want to wire a spoke explicitly / immediately as part of
+# project onboarding. If you rely on the DeployIfNotExists policy instead, the
+# wiring is created automatically and this pipeline is optional.
+#
+# Run manually (or call from your onboarding orchestration) and supply the
+# runtime parameters below. The spokeServiceConnection must be an ARM service
+# connection scoped to the target project subscription.
+# =============================================================================
+
+parameters:
+  - name: projectName
+    type: string
+  - name: spokeServiceConnection
+    type: string
+  - name: spokeSubscriptionId
+    type: string
+  - name: registrarFunctionId
+    type: string
+    displayName: 'Registrar function ID (.../functions/RegisterVmDns)'
+  - name: location
+    type: string
+    default: westeurope
+  - name: deadLetterContainerId
+    type: string
+    default: ''
+
+# Manual invocation only.
+trigger: none
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - group: az-fx-dns-registrar    # for tfBackend* values
+
+stages:
+  - stage: OnboardSpoke
+    displayName: 'Wire ${{ parameters.projectName }}'
+    jobs:
+      - deployment: spoke
+        displayName: terraform apply spoke
+        environment: az-fx-dns-prod
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - task: Bash@3
+                  displayName: 'Register Microsoft.EventGrid + install Terraform'
+                  inputs:
+                    targetType: inline
+                    script: |
+                      set -euo pipefail
+                      curl -sLo tf.zip https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip
+                      unzip -o -q tf.zip && sudo mv terraform /usr/local/bin/terraform
+                - task: AzureCLI@2
+                  displayName: 'apply spoke wiring'
+                  inputs:
+                    azureSubscription: ${{ parameters.spokeServiceConnection }}
+                    scriptType: bash
+                    addSpnToEnvironment: true
+                    workingDirectory: terraform/spoke-root
+                    inlineScript: |
+                      set -euo pipefail
+                      export ARM_CLIENT_ID="$servicePrincipalId"
+                      export ARM_CLIENT_SECRET="$servicePrincipalKey"
+                      export ARM_TENANT_ID="$tenantId"
+                      export ARM_SUBSCRIPTION_ID="${{ parameters.spokeSubscriptionId }}"
+
+                      # Event Grid RP must be registered in the spoke once.
+                      az provider register --namespace Microsoft.EventGrid --subscription "${{ parameters.spokeSubscriptionId }}"
+
+                      terraform init -input=false \
+                        -backend-config="resource_group_name=$(tfBackendResourceGroup)" \
+                        -backend-config="storage_account_name=$(tfBackendStorageAccount)" \
+                        -backend-config="container_name=$(tfBackendContainer)" \
+                        -backend-config="key=az-fx-dns-registrar/spoke-${{ parameters.projectName }}.tfstate"
+
+                      terraform apply -input=false -auto-approve \
+                        -var "subscription_id=${{ parameters.spokeSubscriptionId }}" \
+                        -var "registrar_function_id=${{ parameters.registrarFunctionId }}" \
+                        -var "project_name=${{ parameters.projectName }}" \
+                        -var "location=${{ parameters.location }}" \
+                        -var "dead_letter_storage_container_id=${{ parameters.deadLetterContainerId }}"
